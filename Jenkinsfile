@@ -1,37 +1,97 @@
 pipeline {
     agent any
+
+    tools {
+        jdk 'JDK23'
+        nodejs 'Node24'
+    }
+
+    environment {
+        IMAGE_NAME = "mohittkumarr/task-manager"
+    }
+
     stages {
-        stage('Clone Repo') {
+
+        stage('Clean Workspace') {
             steps {
-                git url: 'https://github.com/DevOops123/DevOpsLab.git', branch: 'main'
+                cleanWs()
             }
         }
-        stage('Install Backend') {
+
+        stage('Clone Repository') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/mohittkumarr5/taskmanager.git'
+            }
+        }
+
+        // stage('Frontend Dependencies') {
+        //     steps {
+        //         dir('frontend') {
+        //             bat 'npm install'
+        //         }
+        //     }
+        // }
+
+        stage('Backend Dependencies') {
             steps {
                 dir('backend') {
                     bat 'npm install'
                 }
             }
         }
-        stage('SonarQube') {
+
+        stage('SonarCloud Analysis') {
             steps {
-                bat """
-                "D:\\sonar-scanner-6.2.1.4610-windows-x64\\bin\\sonar-scanner.bat" -Dsonar.projectKey=ee -Dsonar.sources=. -Dsonar.host.url=http://localhost:9000 -Dsonar.login=squ_e686dd270e78e7a88fc994c24fcc84de437fe813
-                """
+                script {
+                    def scannerHome = tool 'sonar-scanner'
+                    withSonarQubeEnv('sonarcloud') {
+                        bat """
+                        ${scannerHome}\\bin\\sonar-scanner.bat ^
+                        -Dsonar.projectKey=mohittkumarr5_taskmanager ^
+                        -Dsonar.organization=mohittkumarr5 ^
+                        -Dsonar.sources=. ^
+                        -Dsonar.host.url=https://sonarcloud.io ^
+                        -Dsonar.token=%SONAR_AUTH_TOKEN%
+                        """
+                    }
+                }
             }
         }
-        stage('Build Images') {
+
+        stage('Trivy Scan') {
             steps {
-                bat 'docker build -t backend:latest ./backend'
-                bat 'docker build -t frontend:latest ./frontend'
+                bat '"C:\\Users\\mohit\\AppData\\Local\\Microsoft\\WinGet\\Packages\\AquaSecurity.Trivy_Microsoft.Winget.Source_8wekyb3d8bbwe\\trivy.exe" fs --scanners vuln . > trivy-report.txt'
             }
         }
-        stage('Run Containers') {
+
+        stage('Build Docker Image') {
             steps {
-                bat 'docker rm -f backend frontend || true'
-                bat 'docker run -d -p 5000:5000 --name backend backend:latest'
-                bat 'docker run -d -p 3000:80 --name frontend frontend:latest'
+                bat 'docker build -t %IMAGE_NAME% .'
             }
+        }
+
+        stage('Deploy Frontend to Vercel') {
+            steps {
+                dir('frontend') {
+                    withCredentials([string(
+                        credentialsId: 'vercel-token',
+                        variable: 'VERCEL_TOKEN'
+                    )]) {
+                        bat 'npx vercel --prod --token %VERCEL_TOKEN% --yes'
+                    }
+                }
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
         }
     }
 }
